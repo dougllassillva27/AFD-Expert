@@ -64,7 +64,7 @@ $base = '/Secullum/AFD-Expert';
       <!-- Formulário para upload de arquivo AFD -->
       <form id="uploadForm" enctype="multipart/form-data">
         <div class="file-action-group">
-          <button class="btn-home" data-tooltip="Voltar para a tela inicial" onclick="window.location.href='index.php'">
+          <button type="button" class="btn-home" data-tooltip="Voltar para a tela inicial" onclick="window.location.href='index.php'">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" class="btn-icon">
               <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9z" />
               <path d="M9 22V12h6v10" />
