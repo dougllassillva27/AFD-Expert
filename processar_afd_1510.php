@@ -168,9 +168,16 @@ function processarAFD1510($data) {
 
     // Extrai metadados do cabeçalho (tipo 1)
     $cabecalho = $registros['1'][0] ?? '';
+    $serialEquipamento = substr($cabecalho, 187, 17); // Posições 188 a 204 (17 caracteres)
     $dataInicio = substr($cabecalho, 204, 8);
     $dataFim = substr($cabecalho, 212, 8);
     $dataHoraGeracao = substr($cabecalho, 220, 8) . substr($cabecalho, 228, 4); // Data (ddmmaaaa) + Hora (HHMM)
+
+    // Valida o número serial (deve ser 17 dígitos numéricos)
+    if ($cabecalho && !preg_match('/^\d{17}$/', $serialEquipamento)) {
+        $linhasInvalidas[] = $cabecalho;
+        $registros['1'] = [];
+    }
 
     // Extrai informações da última alteração de empresa (tipo 2)
     $ultimoTipo2 = end($registros['2']);
@@ -208,6 +215,7 @@ function processarAFD1510($data) {
         'dataInicio' => $dataInicio,
         'dataFim' => $dataFim,
         'dataHoraGeracao' => $dataHoraGeracao,
+        'serialEquipamento' => $serialEquipamento, // Adicionado
         'ultimaAlteracaoEmpresa' => $ultimaAlteracaoEmpresa
     ];
 }

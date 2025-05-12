@@ -31,7 +31,7 @@
 
 // Processador para Portaria 671
 const AFDProcessor = {
-  // Elementos do DOM usados frequentemente, agrupados para fácil禁止: true
+  // Elementos do DOM usados frequentemente, agrupados para fácil acesso
   dom: {
     resultado: document.getElementById('resultado'),
     searchArea: document.getElementById('searchArea'),
@@ -725,11 +725,10 @@ const AFDProcessor1510 = {
     this.dom.searchArea.style.display = 'none';
     if (!this.registrosData?.registros) return;
 
-    const cabecalho = this.registrosData.registros[1]?.[0] || '';
     const detalhes = {
       dataHoraGeracao: this.format.dateTime(this.registrosData.dataHoraGeracao),
       totalLinhas: this.registrosData.totalLinhas,
-      serialEquipamento: cabecalho.substring(187, 204).trim(),
+      serialEquipamento: this.registrosData.serialEquipamento || 'Não disponível',
       dataInicio: this.format.date(this.registrosData.dataInicio),
       dataFim: this.format.date(this.registrosData.dataFim),
       tipo2: 0,
