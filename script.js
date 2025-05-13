@@ -741,12 +741,14 @@ Razão social: ${this.format.cleanRazaoSocial(this.registrosData.ultimaAlteracao
     }
     this.showLoading(true);
     this.dom.searchArea.style.display = 'none';
-    if (!this.registrosData?.linhas || this.registrosData.linhas.length === 0) {
+    if (!this.registrosData?.registros || Object.keys(this.registrosData.registros).length === 0) {
       this.dom.resultado.textContent = 'Nenhum registro disponível para interpretação.';
       this.hideLoading();
       return;
     }
-    const todasLinhas = this.registrosData.linhas;
+    const todasLinhas = Object.values(this.registrosData.registros)
+      .flat()
+      .sort((a, b) => parseInt(a.substring(0, 9), 10) - parseInt(b.substring(0, 9), 10));
     const batchSize = 500;
     let index = 0;
     const resultados = [];
