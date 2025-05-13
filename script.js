@@ -243,7 +243,24 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
       return;
     }
     this.dom.saveSearchButton.disabled = false;
-    this.displayResult(resultados);
+    // Gerar resultados interpretados
+    const cacheKey = `search_interpreted_${termo}`;
+    if (this.resultCache[cacheKey]) {
+      this.dom.resultado.textContent = this.resultCache[cacheKey];
+      return;
+    }
+    const chunks = [];
+    for (const tipo in resultados) {
+      const registros = resultados[tipo];
+      if (registros.length > 0) {
+        chunks.push(`${this.tipoRegistroDescricao[tipo] || `Tipo ${tipo}:`}\n`);
+        chunks.push(...registros.map((linha) => `${this.interpretarLinha(linha, tipo)}\n`));
+        chunks.push('-'.repeat(40) + '\n');
+      }
+    }
+    const result = chunks.length > 0 ? chunks.join('') : 'Nenhum registro encontrado.\n';
+    this.resultCache[cacheKey] = result;
+    this.dom.resultado.textContent = result;
   },
   saveSearchResults() {
     if (!this.lastSearchResults) {
@@ -255,7 +272,7 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
       const registros = this.lastSearchResults[tipo];
       if (registros.length > 0) {
         chunks.push(`${this.tipoRegistroDescricao[tipo] || `Tipo ${tipo}:`}\n`);
-        chunks.push(...registros.map((linha) => `${linha}\n`));
+        chunks.push(...registros.map((linha) => `${this.interpretarLinha(linha, tipo)}\n`));
         chunks.push('-'.repeat(40) + '\n');
       }
     }
@@ -737,8 +754,9 @@ Razão social: ${this.format.cleanRazaoSocial(this.registrosData.ultimaAlteracao
       try {
         const end = Math.min(index + batchSize, todasLinhas.length);
         for (; index < end; index++) {
-          const { conteudo, tipo } = todasLinhas[index];
-          resultados.push(this.interpretarLinha(conteudo, tipo));
+          const linha = todasLinhas[index];
+          const tipo = linha.substring(9, 10);
+          resultados.push(this.interpretarLinha(linha, tipo));
         }
         const progress = Math.round((index / todasLinhas.length) * 100);
         document.getElementById('loadingOverlay').querySelector('p').textContent = `Processando... ${progress}%`;
