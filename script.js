@@ -59,18 +59,19 @@ const AFDProcessor = {
     },
     dateTime(dateTimeStr) {
       if (!dateTimeStr) return 'Não disponível';
-      const [datePart, timePart] = dateTimeStr.split(' ');
+      const [datePart, timePart] = dateTimeStr.split('T');
       return datePart && timePart ? `${datePart.split('-').reverse().join('/')} ${timePart.substring(0, 5)}` : 'Inválido';
     },
     dataHora(dataHoraStr) {
-      if (typeof dataHoraStr !== 'string' || !dataHoraStr.includes(' ')) {
+      if (!dataHoraStr || typeof dataHoraStr !== 'string' || dataHoraStr.length < 19) {
         return 'Data/Hora inválida';
       }
-      const [data, tempo] = dataHoraStr.split(' ');
-      if (!data || !tempo) {
+      const match = dataHoraStr.match(/^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/);
+      if (!match) {
         return 'Data/Hora inválida';
       }
-      return `${data.split('-').reverse().join('/')} ${tempo.substring(0, 5)}`;
+      const [, year, month, day, hour, minute] = match;
+      return `${day}/${month}/${year} ${hour}:${minute}`;
     },
   },
   init() {
@@ -201,23 +202,47 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
       alert('Por favor, carregue um arquivo antes de pesquisar.');
       return;
     }
+    const isCPF = /^\d{11}$/.test(termo);
     const resultados = {};
     let totalResultados = 0;
-    for (const tipo in this.registrosData.registros) {
-      const filtered = this.registrosData.registros[tipo].filter((linha) => {
-        return linha && typeof linha === 'string' && linha.toLowerCase().includes(termo.toLowerCase());
-      });
-      if (filtered.length > 0) {
-        resultados[tipo] = filtered;
-        totalResultados += filtered.length;
+    if (isCPF) {
+      for (const tipo of ['3', '5']) {
+        if (this.registrosData.registros[tipo]) {
+          const filtered = this.registrosData.registros[tipo].filter((linha) => {
+            if (!linha || typeof linha !== 'string') return false;
+            let cpf = '';
+            if (tipo === '3' && linha.length >= 46) {
+              cpf = linha.substring(34, 46).trim();
+            } else if (tipo === '5' && linha.length >= 47) {
+              cpf = linha.substring(35, 47).trim();
+            }
+            return cpf === termo;
+          });
+          if (filtered.length > 0) {
+            resultados[tipo] = filtered;
+            totalResultados += filtered.length;
+          }
+        }
+      }
+    } else {
+      for (const tipo in this.registrosData.registros) {
+        const filtered = this.registrosData.registros[tipo].filter((linha) => {
+          return linha && typeof linha === 'string' && linha.toLowerCase().includes(termo.toLowerCase());
+        });
+        if (filtered.length > 0) {
+          resultados[tipo] = filtered;
+          totalResultados += filtered.length;
+        }
       }
     }
     this.lastSearchResults = resultados;
     if (totalResultados === 0) {
       this.dom.resultado.textContent = 'Nenhum resultado encontrado para o termo pesquisado.';
       this.lastSearchResults = null;
+      this.dom.saveSearchButton.disabled = true;
       return;
     }
+    this.dom.saveSearchButton.disabled = false;
     this.displayResult(resultados);
   },
   saveSearchResults() {
@@ -302,14 +327,15 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
     switch (tipo) {
       case '1':
         if (linha.length >= 226) {
-          descricao += `Cabeçalho - Data Início: ${linha.substring(206, 216)} | Data Fim: ${linha.substring(216, 226)}`;
+          descricao += `Cabeçalho - Data Início: ${this.format.date(linha.substring(206, 216))} | Data Fim: ${this.format.date(linha.substring(216, 226))}`;
         } else {
           descricao += 'Cabeçalho - Formato inválido';
         }
         break;
       case '2':
         if (linha.length >= 227) {
-          descricao += `Alteração Empresa - Razão Social: ${linha.substring(77, 227).trim()} | CNPJ: ${linha.substring(49, 63).trim()}`;
+          const dataHora = linha.substring(10, 34);
+          descricao += `Alteração Empresa - Data: ${this.format.dataHora(dataHora)} | Razão Social: ${linha.substring(77, 227).trim()} | CNPJ: ${linha.substring(49, 63).trim()}`;
         } else {
           descricao += 'Alteração Empresa - Formato inválido';
         }
@@ -333,8 +359,9 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
         break;
       case '5':
         if (linha.length >= 99) {
+          const dataHora = linha.substring(10, 34);
           const operacao = linha.substring(34, 35) === 'I' ? 'Inclusão' : linha.substring(34, 35) === 'A' ? 'Alteração' : 'Exclusão';
-          descricao += `${operacao} Funcionário - Nome: ${linha.substring(47, 99).trim()} | CPF: ${linha.substring(35, 47).trim()}`;
+          descricao += `${operacao} Funcionário - Data: ${this.format.dataHora(dataHora)} | Nome: ${linha.substring(47, 99).trim()} | CPF: ${linha.substring(35, 47).trim()}`;
         } else {
           descricao += 'Funcionário - Formato inválido';
         }
@@ -342,7 +369,7 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
       case '6':
         if (linha.length >= 36) {
           const dataHora = linha.substring(10, 34);
-          descricao += `Evento Sensível - Tipo ${linha.substring(34, 36)} | ${this.format.dataHora(dataHora)}`;
+          descricao += `Evento Sensível - Tipo ${linha.substring(34, 36)} | Data: ${this.format.dataHora(dataHora)}`;
         } else {
           descricao += 'Evento Sensível - Formato inválido';
         }
