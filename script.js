@@ -31,7 +31,6 @@
 
 // Processador para Portaria 671
 const AFDProcessor = {
-  // Elementos do DOM usados frequentemente, agrupados para fácil acesso
   dom: {
     resultado: document.getElementById('resultado'),
     searchArea: document.getElementById('searchArea'),
@@ -41,17 +40,9 @@ const AFDProcessor = {
     fileInput: document.getElementById('file'),
     fileName: document.getElementById('file-name'),
   },
-
-  // Armazena os dados processados do arquivo AFD
   registrosData: {},
-
-  // Cache para resultados já processados, evita reprocessamento
   resultCache: {},
-
-  // Armazena os resultados da última busca para exportação
   lastSearchResults: null,
-
-  // Descrições dos tipos de registros para exibição amigável
   tipoRegistroDescricao: {
     1: 'Cabeçalho:',
     2: 'Tipo 2: Registros do tipo 2 (Identificação da empresa no REP):',
@@ -60,24 +51,17 @@ const AFDProcessor = {
     5: 'Tipo 5: Registros do tipo 5 (Inclusão, alteração ou exclusão de empregado no REP):',
     6: 'Tipo 6: Registros do tipo 6 (Eventos sensíveis do REP):',
   },
-
-  // Funções utilitárias para formatação de datas
   format: {
-    // Formata uma data no formato DD-MM-AAAA
     date(dateStr) {
       if (!dateStr) return 'Não disponível';
       const [y, m, d] = dateStr.split('-');
       return d && m && y ? `${d.padStart(2, '0')}-${m.padStart(2, '0')}-${y}` : 'Inválida';
     },
-
-    // Formata uma data/hora no formato DD/MM/AAAA HH:MM:SS
     dateTime(dateTimeStr) {
       if (!dateTimeStr) return 'Não disponível';
       const [datePart, timePart] = dateTimeStr.split(' ');
       return datePart && timePart ? `${datePart.split('-').reverse().join('/')} ${timePart.substring(0, 5)}` : 'Inválido';
     },
-
-    // Formata data/hora de registros AFD para DD/MM/AAAA HH:MM:SS
     dataHora(dataHoraStr) {
       if (typeof dataHoraStr !== 'string' || !dataHoraStr.includes(' ')) {
         return 'Data/Hora inválida';
@@ -89,75 +73,47 @@ const AFDProcessor = {
       return `${data.split('-').reverse().join('/')} ${tempo.substring(0, 5)}`;
     },
   },
-
-  /*
-   * init - Inicializa os eventos do frontend.
-   * Configura listeners para upload de arquivo, pesquisa por Enter e salvar busca.
-   * É chamado ao carregar a página para preparar a interface.
-   */
   init() {
-    // Permite pesquisar pressionando Enter no campo de busca
     this.dom.searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') this.performSearch();
     });
-
-    // Listener para o botão "Salvar busca"
     this.dom.saveSearchButton.addEventListener('click', () => this.saveSearchResults());
-
-    // Manipula o envio do formulário de upload
     document.getElementById('uploadForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      this.showLoading(); // Exibe overlay de carregamento
-
+      this.showLoading();
       const formData = new FormData();
       formData.append('file', this.dom.fileInput.files[0]);
-
       try {
         const response = await fetch('processar_afd.php', {
           method: 'POST',
           body: formData,
         });
-
         if (!response.ok) {
           throw new Error('Erro ao processar o arquivo');
         }
-
-        // Armazena os dados processados e exibe os resultados
         this.registrosData = await response.json();
         this.displayResult(this.registrosData.registros);
-
-        // Habilita os botões de filtro após o upload
         document.querySelectorAll('.buttons button').forEach((button) => {
           button.disabled = false;
           button.classList.remove('btn-disabled');
           button.removeAttribute('title');
         });
       } catch (error) {
-        console.error('Erro:', error);
         alert('Erro ao processar o arquivo: ' + error.message);
       } finally {
-        this.hideLoading(); // Esconde overlay de carregamento
+        this.hideLoading();
       }
     });
   },
-
-  /*
-   * displayResult - Exibe os registros no elemento <pre>.
-   * Usa cache para evitar reprocessamento e organiza os dados por tipo.
-   * Usada para filtros e exibição inicial.
-   */
   displayResult(data) {
-    // Gera uma chave única para o cache baseada nos tipos e conteúdo dos dados
     const cacheKey = JSON.stringify({
       types: Object.keys(data).sort(),
       content: Object.values(data).flat().join('|'),
     });
     if (this.resultCache[cacheKey]) {
-      // Usa resultado em cache, se disponível
       this.dom.resultado.textContent = this.resultCache[cacheKey];
       return;
     }
-
     const chunks = [];
     for (const tipo in data) {
       const registros = Array.isArray(data[tipo]) ? data[tipo] : Object.values(data[tipo]);
@@ -167,53 +123,36 @@ const AFDProcessor = {
         chunks.push('-'.repeat(40) + '\n');
       }
     }
-
     const result = chunks.length > 0 ? chunks.join('') : 'Nenhum registro encontrado.\n';
-    this.resultCache[cacheKey] = result; // Armazena no cache
-    this.dom.resultado.textContent = result; // Exibe no <pre>
+    this.resultCache[cacheKey] = result;
+    this.dom.resultado.textContent = result;
   },
-
-  /*
-   * filterByType - Filtra registros por tipo (ex.: "all", "3").
-   * Limpa a área de busca e chama displayResult com os dados filtrados.
-   */
   filterByType(tipo) {
     if (!this.registrosData || !this.registrosData.registros) {
       alert('Por favor, carregue um arquivo antes de usar os filtros.');
       return;
     }
-
     this.dom.searchArea.style.display = 'none';
     this.dom.searchInput.value = '';
     const filteredData = tipo === 'all' ? this.registrosData.registros : { [tipo]: this.registrosData.registros[tipo] || [] };
     this.displayResult(filteredData);
   },
-
-  /*
-   * filterInvalidLines - Exibe linhas inválidas do arquivo.
-   * Usado para depuração de arquivos com formatação incorreta.
-   */
   filterInvalidLines() {
     this.dom.searchArea.style.display = 'none';
     if (!this.registrosData?.linhasInvalidas) return;
-
     const texto = this.registrosData.linhasInvalidas.length > 0 ? `Linhas inválidas:\n${this.registrosData.linhasInvalidas.join('\n')}` : 'Nenhuma linha inválida encontrada';
     this.dom.resultado.textContent = texto;
   },
-
-  /*
-   * showDetails - Exibe informações resumidas do arquivo (ex.: datas, contagens).
-   * Extrai dados do cabeçalho e dos registros para um relatório detalhado.
-   */
   showDetails() {
     this.dom.searchArea.style.display = 'none';
     if (!this.registrosData?.registros) return;
-
     const cabecalho = this.registrosData.registros[1]?.[0] || '';
+    const serialEquipamento = cabecalho.substring(187, 204);
     const detalhes = {
       dataHoraGeracao: this.format.dateTime(this.registrosData.dataHoraGeracao),
       totalLinhas: this.registrosData.totalLinhas,
-      serialEquipamento: cabecalho.substring(189, 206).trim(),
+      serialEquipamento: serialEquipamento.padStart(17, '0'),
+      cnpjCpfEmpregadorCabecalho: this.registrosData.cnpjCpfEmpregadorCabecalho || 'Não disponível',
       dataInicio: this.format.date(this.registrosData.dataInicio),
       dataFim: this.format.date(this.registrosData.dataFim),
       tipo2: 0,
@@ -221,7 +160,6 @@ const AFDProcessor = {
       tipo4: 0,
       tipo5: 0,
     };
-
     for (const tipo in this.registrosData.registros) {
       const t = parseInt(tipo, 10);
       if (t === 2) detalhes.tipo2 = this.registrosData.registros[tipo].length;
@@ -229,7 +167,6 @@ const AFDProcessor = {
       if (t === 4) detalhes.tipo4 = this.registrosData.registros[tipo].length;
       if (t === 5) detalhes.tipo5 = this.registrosData.registros[tipo].length;
     }
-
     let detalhesText = `
 Detalhes do arquivo:
 ----------------------------------------
@@ -244,7 +181,6 @@ Nº serial do equipamento: ${detalhes.serialEquipamento}
 Data de início dos eventos: ${detalhes.dataInicio}
 Data de fim dos eventos: ${detalhes.dataFim}
 `;
-
     if (this.registrosData.ultimaAlteracaoEmpresa) {
       detalhesText += `
 Última alteração da empresa:
@@ -253,64 +189,42 @@ CNPJ/CPF do empregador: ${this.registrosData.ultimaAlteracaoEmpresa.cnpjCpfEmpre
 Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
 `;
     }
-
     this.dom.resultado.textContent = detalhesText;
   },
-
-  /*
-   * performSearch - Realiza busca nos registros por um termo.
-   * Filtra todas as linhas que contêm o termo (case-insensitive) e armazena resultados.
-   */
   performSearch() {
-    const termo = this.dom.searchInput.value.trim().toLowerCase();
+    const termo = this.dom.searchInput.value.trim();
     if (!termo) {
       alert('Digite um termo para pesquisar');
       return;
     }
-
     if (!this.registrosData || !this.registrosData.registros) {
       alert('Por favor, carregue um arquivo antes de pesquisar.');
       return;
     }
-
     const resultados = {};
     let totalResultados = 0;
-
-    // Filtra registros por tipo, incluindo apenas tipos com resultados
     for (const tipo in this.registrosData.registros) {
       const filtered = this.registrosData.registros[tipo].filter((linha) => {
-        return linha && typeof linha === 'string' && linha.toLowerCase().includes(termo);
+        return linha && typeof linha === 'string' && linha.toLowerCase().includes(termo.toLowerCase());
       });
       if (filtered.length > 0) {
         resultados[tipo] = filtered;
         totalResultados += filtered.length;
       }
     }
-
-    // Armazena os resultados para exportação
     this.lastSearchResults = resultados;
-
-    // Exibe mensagem se não houver resultados
     if (totalResultados === 0) {
       this.dom.resultado.textContent = 'Nenhum resultado encontrado para o termo pesquisado.';
-      this.lastSearchResults = null; // Limpa resultados se não houver
+      this.lastSearchResults = null;
       return;
     }
-
-    // Exibe os resultados filtrados
     this.displayResult(resultados);
   },
-
-  /*
-   * saveSearchResults - Exporta os resultados da última busca como arquivo .txt.
-   * Gera um arquivo com o mesmo formato da exibição no <pre>, com nome baseado no termo pesquisado.
-   */
   saveSearchResults() {
     if (!this.lastSearchResults) {
       alert('Nenhuma busca realizada ou nenhum resultado encontrado.');
       return;
     }
-
     const chunks = [];
     for (const tipo in this.lastSearchResults) {
       const registros = this.lastSearchResults[tipo];
@@ -320,16 +234,12 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
         chunks.push('-'.repeat(40) + '\n');
       }
     }
-
     const content = chunks.join('');
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-
-    // Obtém o termo pesquisado e limpa para uso no nome do arquivo
     let termo = this.dom.searchInput.value.trim();
     if (!termo) {
       termo = 'sem_termo';
     } else {
-      // Substitui caracteres inválidos por underscore
       termo = termo
         .replace(/[^a-zA-Z0-9]/g, '_')
         .replace(/_+/g, '_')
@@ -338,7 +248,6 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
         termo = 'termo_invalido';
       }
     }
-
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -348,35 +257,22 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },
-
-  /*
-   * showInterpretedLines - Exibe todas as linhas interpretadas de forma legível.
-   * Usa processamento em lotes para evitar travamentos em arquivos grandes.
-   * Inclui barra de progresso para feedback visual.
-   */
   showInterpretedLines() {
     const cacheKey = 'interpreted_lines';
     if (this.resultCache[cacheKey]) {
-      // Usa cache para evitar reprocessamento
       this.dom.resultado.textContent = this.resultCache[cacheKey];
       this.dom.searchArea.style.display = 'none';
       return;
     }
-
-    this.showLoading(true); // Exibe overlay com progresso
+    this.showLoading(true);
     this.dom.searchArea.style.display = 'none';
     if (!this.registrosData?.registros) return;
-
-    // Ordena todas as linhas por NSR
     const todasLinhas = Object.values(this.registrosData.registros)
       .flat()
       .sort((a, b) => parseInt(a.substring(0, 9), 10) - parseInt(b.substring(0, 9), 10));
-
-    const batchSize = 1000; // Tamanho do lote para processamento
+    const batchSize = 1000;
     let index = 0;
     const resultados = [];
-
-    // Função interna para processar lotes
     const processBatch = () => {
       const end = Math.min(index + batchSize, todasLinhas.length);
       for (; index < end; index++) {
@@ -384,37 +280,25 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
         const tipo = linha.substring(9, 10);
         resultados.push(this.interpretarLinha(linha, tipo));
       }
-
-      // Atualiza barra de progresso
       const progress = Math.round((index / todasLinhas.length) * 100);
       document.getElementById('loadingOverlay').querySelector('p').textContent = `Processando... ${progress}%`;
       document.getElementById('loadingOverlay').querySelector('.progress-bar-fill').style.width = `${progress}%`;
-
       if (index < todasLinhas.length) {
-        setTimeout(processBatch, 0); // Agenda próximo lote
+        setTimeout(processBatch, 0);
       } else {
         const result = resultados.join('\n');
-        this.resultCache[cacheKey] = result; // Armazena no cache
-        this.dom.resultado.textContent = result; // Exibe resultado
-        this.hideLoading(); // Esconde overlay
+        this.resultCache[cacheKey] = result;
+        this.dom.resultado.textContent = result;
+        this.hideLoading();
       }
     };
-
     processBatch();
   },
-
-  /*
-   * interpretarLinha - Converte uma linha AFD em texto legível.
-   * Extrai informações específicas com base no tipo de registro.
-   * Inclui validações para evitar erros em linhas malformadas.
-   */
   interpretarLinha(linha, tipo) {
     if (!linha || typeof linha !== 'string') {
       return 'Linha inválida: Dados ausentes';
     }
-
     let descricao = `NSR: ${linha.substring(0, 9).trim()} - Tipo: `;
-
     switch (tipo) {
       case '1':
         if (linha.length >= 226) {
@@ -466,47 +350,30 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
       default:
         descricao += 'Registro desconhecido';
     }
-
     return descricao;
   },
-
-  // Alterna visibilidade da área de pesquisa
   toggleSearch() {
     this.dom.searchArea.style.display = this.dom.searchArea.style.display === 'none' ? 'block' : 'none';
-    this.dom.resultado.textContent = ''; // Limpa resultado ao abrir/fechar busca
+    this.dom.resultado.textContent = '';
   },
-
-  // Atualiza o nome do arquivo exibido na interface
   updateFileName() {
     this.dom.fileName.textContent = this.dom.fileInput.files[0]?.name || 'Nenhum arquivo selecionado';
   },
-
-  /*
-   * clearFile - Reseta o estado da aplicação.
-   * Limpa o input de arquivo, resultados, cache e desabilita botões.
-   */
   clearFile() {
     this.dom.fileInput.value = '';
     this.dom.fileName.textContent = 'Nenhum arquivo selecionado';
     this.dom.resultado.textContent = '';
     this.registrosData = {};
-    this.resultCache = {}; // Limpa cache
-    this.lastSearchResults = null; // Limpa resultados da busca
+    this.resultCache = {};
+    this.lastSearchResults = null;
     this.dom.searchArea.style.display = 'none';
     this.dom.searchInput.value = '';
-
-    // Desabilita botões de filtro
     document.querySelectorAll('.buttons button').forEach((button) => {
       button.disabled = true;
       button.classList.add('btn-disabled');
       button.setAttribute('title', 'Carregue o arquivo primeiramente');
     });
   },
-
-  /*
-   * showLoading - Exibe o overlay de carregamento.
-   * Suporta progresso (para operações longas como interpretação de linhas).
-   */
   showLoading(showProgress = false) {
     const overlay = document.getElementById('loadingOverlay');
     overlay.style.display = 'flex';
@@ -518,11 +385,6 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
       overlay.querySelector('.progress-bar-fill').style.width = '0%';
     }
   },
-
-  /*
-   * hideLoading - Esconde o overlay de carregamento.
-   * Usado ao final de operações como upload ou interpretação.
-   */
   hideLoading() {
     document.getElementById('loadingOverlay').style.display = 'none';
   },
@@ -530,7 +392,6 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
 
 // Processador para Portaria 1510
 const AFDProcessor1510 = {
-  // Elementos do DOM usados frequentemente, agrupados para fácil acesso
   dom: {
     resultado: document.getElementById('resultado'),
     searchArea: document.getElementById('searchArea'),
@@ -540,17 +401,9 @@ const AFDProcessor1510 = {
     fileInput: document.getElementById('file'),
     fileName: document.getElementById('file-name'),
   },
-
-  // Armazena os dados processados do arquivo AFD
   registrosData: {},
-
-  // Cache para resultados já processados, evita reprocessamento
   resultCache: {},
-
-  // Armazena os resultados da última busca para exportação
   lastSearchResults: null,
-
-  // Descrições dos tipos de registros para exibição amigável
   tipoRegistroDescricao: {
     1: 'Cabeçalho:',
     2: 'Tipo 2: Registros do tipo 2 (Identificação da empresa no REP):',
@@ -559,19 +412,14 @@ const AFDProcessor1510 = {
     5: 'Tipo 5: Registros do tipo 5 (Inclusão, alteração ou exclusão de empregado no REP):',
     9: 'Tipo 9: Registros do tipo 9 (Trailer):',
   },
-
-  // Funções utilitárias para formatação de datas
   format: {
-    // Formata uma data no formato DD-MM-AAAA
     date(dateStr) {
       if (!dateStr || dateStr.length < 8) return 'Não disponível';
       const d = dateStr.substring(0, 2);
       const m = dateStr.substring(2, 4);
       const y = dateStr.substring(4, 8);
-      return `${d}-${m}-${y}`;
+      return `${d}/${m}/${y}`;
     },
-
-    // Formata uma data/hora no formato DD/MM/AAAA HH:MM
     dateTime(dateTimeStr) {
       if (!dateTimeStr || dateTimeStr.length < 12) return 'Não disponível';
       const d = dateTimeStr.substring(0, 2);
@@ -581,8 +429,6 @@ const AFDProcessor1510 = {
       const min = dateTimeStr.substring(10, 12);
       return `${d}/${m}/${y} ${h}:${min}`;
     },
-
-    // Formata data/hora de registros AFD para DD/MM/AAAA HH:MM
     dataHora(dataHoraStr) {
       if (!dataHoraStr || dataHoraStr.length < 12) return 'Data/Hora inválida';
       const d = dataHoraStr.substring(0, 2);
@@ -592,88 +438,55 @@ const AFDProcessor1510 = {
       const min = dataHoraStr.substring(10, 12);
       return `${d}/${m}/${y} ${h}:${min}`;
     },
-
-    // Limpa a razão social, removendo prefixos numéricos ou caracteres indesejados
     cleanRazaoSocial(razaoSocial) {
       if (!razaoSocial) return 'Não disponível';
-      // Remove espaços em branco iniciais e finais
       razaoSocial = razaoSocial.trim();
-      // Remove prefixos numéricos ou caracteres não alfabéticos no início
       razaoSocial = razaoSocial.replace(/^\d+\s*/, '');
-      // Remove caracteres de controle ou não imprimíveis
       razaoSocial = razaoSocial.replace(/[\x00-\x1F\x7F]/g, '');
       return razaoSocial;
     },
   },
-
-  /*
-   * init - Inicializa os eventos do frontend.
-   * Configura listeners para upload de arquivo, pesquisa por Enter e salvar busca.
-   * É chamado ao carregar a página para preparar a interface.
-   */
   init() {
-    // Permite pesquisar pressionando Enter no campo de busca
     this.dom.searchInput.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') this.performSearch();
     });
-
-    // Listener para o botão "Salvar busca"
     this.dom.saveSearchButton.addEventListener('click', () => this.saveSearchResults());
-
-    // Manipula o envio do formulário de upload
     document.getElementById('uploadForm').addEventListener('submit', async (e) => {
       e.preventDefault();
-      this.showLoading(); // Exibe overlay de carregamento
-
+      this.showLoading();
       const formData = new FormData();
       formData.append('file', this.dom.fileInput.files[0]);
-
       try {
         const response = await fetch('processar_afd_1510.php', {
           method: 'POST',
           body: formData,
         });
-
         if (!response.ok) {
           throw new Error('Erro ao processar o arquivo');
         }
-
-        // Armazena os dados processados e exibe os resultados
         this.registrosData = await response.json();
         this.displayResult(this.registrosData.registros);
-
-        // Habilita os botões de filtro após o upload
         document.querySelectorAll('.buttons button').forEach((button) => {
           button.disabled = false;
           button.classList.remove('btn-disabled');
           button.removeAttribute('title');
         });
       } catch (error) {
-        console.error('Erro:', error);
         alert('Erro ao processar o arquivo: ' + error.message);
       } finally {
-        this.hideLoading(); // Esconde overlay de carregamento
+        this.hideLoading();
       }
     });
   },
-
-  /*
-   * displayResult - Exibe os registros no elemento <pre>.
-   * Usa cache para evitar reprocessamento e organiza os dados por tipo.
-   * Usada para filtros e exibição inicial.
-   */
   displayResult(data) {
-    // Gera uma chave única para o cache baseada nos tipos e conteúdo dos dados
     const cacheKey = JSON.stringify({
       types: Object.keys(data).sort(),
       content: Object.values(data).flat().join('|'),
     });
     if (this.resultCache[cacheKey]) {
-      // Usa resultado em cache, se disponível
       this.dom.resultado.textContent = this.resultCache[cacheKey];
       return;
     }
-
     const chunks = [];
     for (const tipo in data) {
       const registros = Array.isArray(data[tipo]) ? data[tipo] : Object.values(data[tipo]);
@@ -683,52 +496,36 @@ const AFDProcessor1510 = {
         chunks.push('-'.repeat(40) + '\n');
       }
     }
-
     const result = chunks.length > 0 ? chunks.join('') : 'Nenhum registro encontrado.\n';
-    this.resultCache[cacheKey] = result; // Armazena no cache
-    this.dom.resultado.textContent = result; // Exibe no <pre>
+    this.resultCache[cacheKey] = result;
+    this.dom.resultado.textContent = result;
   },
-
-  /*
-   * filterByType - Filtra registros por tipo (ex.: "all", "3").
-   * Limpa a área de busca e chama displayResult com os dados filtrados.
-   */
   filterByType(tipo) {
     if (!this.registrosData || !this.registrosData.registros) {
       alert('Por favor, carregue um arquivo antes de usar os filtros.');
       return;
     }
-
     this.dom.searchArea.style.display = 'none';
     this.dom.searchInput.value = '';
     const filteredData = tipo === 'all' ? this.registrosData.registros : { [tipo]: this.registrosData.registros[tipo] || [] };
     this.displayResult(filteredData);
   },
-
-  /*
-   * filterInvalidLines - Exibe linhas inválidas do arquivo.
-   * Usado para depuração de arquivos com formatação incorreta.
-   */
   filterInvalidLines() {
     this.dom.searchArea.style.display = 'none';
     if (!this.registrosData?.linhasInvalidas) return;
-
     const texto = this.registrosData.linhasInvalidas.length > 0 ? `Linhas inválidas:\n${this.registrosData.linhasInvalidas.join('\n')}` : 'Nenhuma linha inválida encontrada';
     this.dom.resultado.textContent = texto;
   },
-
-  /*
-   * showDetails - Exibe informações resumidas do arquivo (ex.: datas, contagens).
-   * Extrai dados do cabeçalho e dos registros para um relatório detalhado.
-   */
   showDetails() {
     this.dom.searchArea.style.display = 'none';
     if (!this.registrosData?.registros) return;
-
+    const cabecalho = this.registrosData.registros[1]?.[0] || '';
+    const serialEquipamento = this.registrosData.serialEquipamento || cabecalho.substring(187, 204);
     const detalhes = {
       dataHoraGeracao: this.format.dateTime(this.registrosData.dataHoraGeracao),
       totalLinhas: this.registrosData.totalLinhas,
-      serialEquipamento: this.registrosData.serialEquipamento || 'Não disponível',
+      serialEquipamento: serialEquipamento,
+      cnpjCpfEmpregadorCabecalho: this.registrosData.cnpjCpfEmpregadorCabecalho || 'Não disponível',
       dataInicio: this.format.date(this.registrosData.dataInicio),
       dataFim: this.format.date(this.registrosData.dataFim),
       tipo2: 0,
@@ -737,7 +534,6 @@ const AFDProcessor1510 = {
       tipo5: 0,
       tipo9: 0,
     };
-
     for (const tipo in this.registrosData.registros) {
       const t = parseInt(tipo, 10);
       if (t === 2) detalhes.tipo2 = this.registrosData.registros[tipo].length;
@@ -746,23 +542,22 @@ const AFDProcessor1510 = {
       if (t === 5) detalhes.tipo5 = this.registrosData.registros[tipo].length;
       if (t === 9) detalhes.tipo9 = this.registrosData.registros[tipo].length;
     }
-
     let detalhesText = `
 Detalhes do arquivo:
 ----------------------------------------
 Data e hora da geração do arquivo: ${detalhes.dataHoraGeracao}
 Quantidade de linhas no arquivo: ${detalhes.totalLinhas}
-Quanidade de registros Tipo 2 (Identificação da empresa no REP): ${detalhes.tipo2}
+Quantidade de registros Tipo 2 (Identificação da empresa no REP): ${detalhes.tipo2}
 Quantidade de registros Tipo 3 (Marcação de ponto): ${detalhes.tipo3}
 Quantidade de registros Tipo 4 (Ajuste do relógio): ${detalhes.tipo4}
 Quantidade de registros Tipo 5 (Inclusão, alteração ou exclusão de empregado no REP): ${detalhes.tipo5}
 Quantidade de registros Tipo 9 (Trailer): ${detalhes.tipo9}
 
 Nº serial do equipamento: ${detalhes.serialEquipamento}
+CNPJ/CPF do empregador (Cabeçalho): ${detalhes.cnpjCpfEmpregadorCabecalho}
 Data de início dos eventos: ${detalhes.dataInicio}
 Data de fim dos eventos: ${detalhes.dataFim}
 `;
-
     if (this.registrosData.ultimaAlteracaoEmpresa) {
       detalhesText += `
 Última alteração da empresa:
@@ -771,83 +566,110 @@ CNPJ/CPF do empregador: ${this.registrosData.ultimaAlteracaoEmpresa.cnpjCpfEmpre
 Razão social: ${this.format.cleanRazaoSocial(this.registrosData.ultimaAlteracaoEmpresa.razaoSocial)}
 `;
     }
-
     this.dom.resultado.textContent = detalhesText;
   },
-
-  /*
-   * performSearch - Realiza busca nos registros por um termo.
-   * Filtra todas as linhas que contêm o termo (case-insensitive) e armazena resultados.
-   */
   performSearch() {
-    const termo = this.dom.searchInput.value.trim().toLowerCase();
+    const termo = this.dom.searchInput.value.trim();
     if (!termo) {
       alert('Digite um termo para pesquisar');
       return;
     }
-
-    if (!this.registrosData || !this.registrosData.registros) {
+    if (!this.registrosData || !this.registrosData.linhas) {
       alert('Por favor, carregue um arquivo antes de pesquisar.');
       return;
     }
-
-    const resultados = {};
+    this.hideLoading();
+    const isPIS = /^\d{12}$/.test(termo);
+    if (isPIS) {
+      this.resultCache = {};
+    }
+    const resultados = [];
     let totalResultados = 0;
-
-    // Filtra registros por tipo, incluindo apenas tipos com resultados
-    for (const tipo in this.registrosData.registros) {
-      const filtered = this.registrosData.registros[tipo].filter((linha) => {
-        return linha && typeof linha === 'string' && linha.toLowerCase().includes(termo);
-      });
-      if (filtered.length > 0) {
-        resultados[tipo] = filtered;
-        totalResultados += filtered.length;
+    if (isPIS) {
+      for (const { conteudo: linha, tipo } of this.registrosData.linhas) {
+        if (!linha || typeof linha !== 'string') {
+          continue;
+        }
+        let pis = '';
+        if (tipo === '3' && linha.length >= 34) {
+          pis = linha.substring(22, 34).trim();
+        } else if (tipo === '5' && linha.length >= 35) {
+          pis = linha.substring(23, 35).trim();
+        }
+        if (pis === termo) {
+          resultados.push({ conteudo: linha, tipo });
+          totalResultados++;
+        }
+      }
+    } else {
+      for (const { conteudo: linha, tipo } of this.registrosData.linhas) {
+        if (linha && typeof linha === 'string' && linha.toLowerCase().includes(termo.toLowerCase())) {
+          resultados.push({ conteudo: linha, tipo });
+          totalResultados++;
+        }
       }
     }
-
-    // Armazena os resultados para exportação
     this.lastSearchResults = resultados;
-
-    // Exibe mensagem se não houver resultados
     if (totalResultados === 0) {
       this.dom.resultado.textContent = 'Nenhum resultado encontrado para o termo pesquisado.';
-      this.lastSearchResults = null; // Limpa resultados se não houver
+      this.lastSearchResults = null;
+      this.dom.saveSearchButton.disabled = true;
       return;
     }
-
-    // Exibe os resultados filtrados
-    this.displayResult(resultados);
+    const cacheKey = `search_interpreted_${termo}`;
+    if (this.resultCache[cacheKey]) {
+      this.dom.resultado.textContent = this.resultCache[cacheKey];
+      this.dom.saveSearchButton.disabled = false;
+      return;
+    }
+    const chunks = [];
+    const resultadosPorTipo = {};
+    for (const { conteudo: linha, tipo } of resultados) {
+      if (!resultadosPorTipo[tipo]) {
+        resultadosPorTipo[tipo] = [];
+      }
+      resultadosPorTipo[tipo].push(linha);
+    }
+    for (const tipo in resultadosPorTipo) {
+      const registros = resultadosPorTipo[tipo];
+      if (registros.length > 0) {
+        chunks.push(`${this.tipoRegistroDescricao[tipo] || `Tipo ${tipo}:`}\n`);
+        chunks.push(...registros.map((linha) => `${this.interpretarLinha(linha, tipo)}\n`));
+        chunks.push('-'.repeat(40) + '\n');
+      }
+    }
+    const result = chunks.length > 0 ? chunks.join('') : 'Nenhum registro encontrado.\n';
+    this.resultCache[cacheKey] = result;
+    this.dom.resultado.textContent = result;
+    this.dom.saveSearchButton.disabled = false;
   },
-
-  /*
-   * saveSearchResults - Exporta os resultados da última busca como arquivo .txt.
-   * Gera um arquivo com o mesmo formato da exibição no <pre>, com nome baseado no termo pesquisado.
-   */
   saveSearchResults() {
     if (!this.lastSearchResults) {
       alert('Nenhuma busca realizada ou nenhum resultado encontrado.');
       return;
     }
-
     const chunks = [];
-    for (const tipo in this.lastSearchResults) {
-      const registros = this.lastSearchResults[tipo];
+    const resultadosPorTipo = {};
+    for (const { conteudo: linha, tipo } of this.lastSearchResults) {
+      if (!resultadosPorTipo[tipo]) {
+        resultadosPorTipo[tipo] = [];
+      }
+      resultadosPorTipo[tipo].push(linha);
+    }
+    for (const tipo in resultadosPorTipo) {
+      const registros = resultadosPorTipo[tipo];
       if (registros.length > 0) {
         chunks.push(`${this.tipoRegistroDescricao[tipo] || `Tipo ${tipo}:`}\n`);
-        chunks.push(...registros.map((linha) => `${linha}\n`));
+        chunks.push(...registros.map((linha) => `${this.interpretarLinha(linha, tipo)}\n`));
         chunks.push('-'.repeat(40) + '\n');
       }
     }
-
     const content = chunks.join('');
     const blob = new Blob([content], { type: 'text/plain;charset=utf-8' });
-
-    // Obtém o termo pesquisado e limpa para uso no nome do arquivo
     let termo = this.dom.searchInput.value.trim();
     if (!termo) {
       termo = 'sem_termo';
     } else {
-      // Substitui caracteres inválidos por underscore
       termo = termo
         .replace(/[^a-zA-Z0-9]/g, '_')
         .replace(/_+/g, '_')
@@ -856,7 +678,6 @@ Razão social: ${this.format.cleanRazaoSocial(this.registrosData.ultimaAlteracao
         termo = 'termo_invalido';
       }
     }
-
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
@@ -866,86 +687,55 @@ Razão social: ${this.format.cleanRazaoSocial(this.registrosData.ultimaAlteracao
     document.body.removeChild(a);
     URL.revokeObjectURL(url);
   },
-
-  /*
-   * showInterpretedLines - Exibe todas as linhas interpretadas de forma legível.
-   * Usa processamento em lotes para evitar travamentos em arquivos grandes.
-   * Inclui barra de progresso para feedback visual e tratamento de erros.
-   */
   showInterpretedLines() {
     const cacheKey = 'interpreted_lines';
     if (this.resultCache[cacheKey]) {
-      // Usa cache para evitar reprocessamento
       this.dom.resultado.textContent = this.resultCache[cacheKey];
       this.dom.searchArea.style.display = 'none';
       this.hideLoading();
       return;
     }
-
-    this.showLoading(true); // Exibe overlay com progresso
+    this.showLoading(true);
     this.dom.searchArea.style.display = 'none';
-
-    // Valida se há registros para processar
-    if (!this.registrosData?.registros || Object.values(this.registrosData.registros).every((arr) => arr.length === 0)) {
+    if (!this.registrosData?.linhas || this.registrosData.linhas.length === 0) {
       this.dom.resultado.textContent = 'Nenhum registro disponível para interpretação.';
       this.hideLoading();
       return;
     }
-
-    // Ordena todas as linhas por NSR
-    const todasLinhas = Object.values(this.registrosData.registros)
-      .flat()
-      .sort((a, b) => parseInt(a.substring(0, 9), 10) - parseInt(b.substring(0, 9), 10));
-
-    const batchSize = 500; // Tamanho do lote reduzido para melhor performance
+    const todasLinhas = this.registrosData.linhas;
+    const batchSize = 500;
     let index = 0;
     const resultados = [];
-
-    // Função interna para processar lotes
     const processBatch = () => {
       try {
         const end = Math.min(index + batchSize, todasLinhas.length);
         for (; index < end; index++) {
-          const linha = todasLinhas[index];
-          const tipo = linha.substring(9, 10);
-          resultados.push(this.interpretarLinha(linha, tipo));
+          const { conteudo, tipo } = todasLinhas[index];
+          resultados.push(this.interpretarLinha(conteudo, tipo));
         }
-
-        // Atualiza barra de progresso
         const progress = Math.round((index / todasLinhas.length) * 100);
         document.getElementById('loadingOverlay').querySelector('p').textContent = `Processando... ${progress}%`;
         document.getElementById('loadingOverlay').querySelector('.progress-bar-fill').style.width = `${progress}%`;
-
         if (index < todasLinhas.length) {
-          setTimeout(processBatch, 0); // Agenda próximo lote
+          setTimeout(processBatch, 0);
         } else {
           const result = resultados.join('\n');
-          this.resultCache[cacheKey] = result; // Armazena no cache
-          this.dom.resultado.textContent = result; // Exibe resultado
-          this.hideLoading(); // Esconde overlay
+          this.resultCache[cacheKey] = result;
+          this.dom.resultado.textContent = result;
+          this.hideLoading();
         }
       } catch (error) {
-        console.error('Erro ao processar linhas interpretadas:', error);
         this.dom.resultado.textContent = `Erro ao processar linhas interpretadas: ${error.message}`;
         this.hideLoading();
       }
     };
-
     processBatch();
   },
-
-  /*
-   * interpretarLinha - Converte uma linha AFD em texto legível.
-   * Extrai informações específicas com base no tipo de registro.
-   * Inclui validações para evitar erros em linhas malformadas.
-   */
   interpretarLinha(linha, tipo) {
     if (!linha || typeof linha !== 'string') {
       return 'Linha inválida: Dados ausentes';
     }
-
     let descricao = `NSR: ${linha.substring(0, 9).trim()} - Tipo: `;
-
     switch (tipo) {
       case '1':
         if (linha.length >= 232) {
@@ -965,7 +755,8 @@ Razão social: ${this.format.cleanRazaoSocial(this.registrosData.ultimaAlteracao
       case '3':
         if (linha.length >= 34) {
           const dataHora = linha.substring(10, 22);
-          descricao += `Marcação Ponto - Data: ${this.format.dataHora(dataHora)} | PIS: ${linha.substring(22, 34).trim()}`;
+          const pis = linha.substring(22, 34).trim();
+          descricao += `Marcação Ponto - Data: ${this.format.dataHora(dataHora)} | PIS: ${pis}`;
         } else {
           descricao += 'Marcação Ponto - Formato inválido';
         }
@@ -982,7 +773,9 @@ Razão social: ${this.format.cleanRazaoSocial(this.registrosData.ultimaAlteracao
       case '5':
         if (linha.length >= 87) {
           const operacao = linha.substring(22, 23) === 'I' ? 'Inclusão' : linha.substring(22, 23) === 'A' ? 'Alteração' : 'Exclusão';
-          descricao += `${operacao} Funcionário - Nome: ${linha.substring(35, 87).trim()} | PIS: ${linha.substring(23, 35).trim()}`;
+          const nome = linha.substring(35, 87).trim();
+          const pis = linha.substring(23, 35).trim();
+          descricao += `${operacao} Funcionário - Nome: ${nome} | PIS: ${pis}`;
         } else {
           descricao += 'Funcionário - Formato inválido';
         }
@@ -997,47 +790,30 @@ Razão social: ${this.format.cleanRazaoSocial(this.registrosData.ultimaAlteracao
       default:
         descricao += 'Registro desconhecido';
     }
-
     return descricao;
   },
-
-  // Alterna visibilidade da área de pesquisa
   toggleSearch() {
     this.dom.searchArea.style.display = this.dom.searchArea.style.display === 'none' ? 'block' : 'none';
-    this.dom.resultado.textContent = ''; // Limpa resultado ao abrir/fechar busca
+    this.dom.resultado.textContent = '';
   },
-
-  // Atualiza o nome do arquivo exibido na interface
   updateFileName() {
     this.dom.fileName.textContent = this.dom.fileInput.files[0]?.name || 'Nenhum arquivo selecionado';
   },
-
-  /*
-   * clearFile - Reseta o estado da aplicação.
-   * Limpa o input de arquivo, resultados, cache e desabilita botões.
-   */
   clearFile() {
     this.dom.fileInput.value = '';
     this.dom.fileName.textContent = 'Nenhum arquivo selecionado';
     this.dom.resultado.textContent = '';
     this.registrosData = {};
-    this.resultCache = {}; // Limpa cache
-    this.lastSearchResults = null; // Limpa resultados da busca
+    this.resultCache = {};
+    this.lastSearchResults = null;
     this.dom.searchArea.style.display = 'none';
     this.dom.searchInput.value = '';
-
-    // Desabilita botões de filtro
     document.querySelectorAll('.buttons button').forEach((button) => {
       button.disabled = true;
       button.classList.add('btn-disabled');
       button.setAttribute('title', 'Carregue o arquivo primeiramente');
     });
   },
-
-  /*
-   * showLoading - Exibe o overlay de carregamento.
-   * Suporta progresso (para operações longas como interpretação de linhas).
-   */
   showLoading(showProgress = false) {
     const overlay = document.getElementById('loadingOverlay');
     overlay.style.display = 'flex';
@@ -1049,11 +825,6 @@ Razão social: ${this.format.cleanRazaoSocial(this.registrosData.ultimaAlteracao
       overlay.querySelector('.progress-bar-fill').style.width = '0%';
     }
   },
-
-  /*
-   * hideLoading - Esconde o overlay de carregamento.
-   * Usado ao final de operações como upload ou interpretação.
-   */
   hideLoading() {
     document.getElementById('loadingOverlay').style.display = 'none';
   },

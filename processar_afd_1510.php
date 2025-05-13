@@ -29,124 +29,105 @@
  * Inclui otimizações como compressão gzip e validação de comprimento de linhas.
  */
 
-/*
- * Configura o cabeçalho para JSON e habilita compressão gzip.
- * A compressão reduz o tamanho da resposta para arquivos grandes.
- */
 header('Content-Type: application/json');
 ob_start('ob_gzhandler');
 
-/*
- * Valida se a requisição é POST.
- * Retorna erro 405 se o método for inválido.
- */
+ini_set('memory_limit', '512M');
+ini_set('max_execution_time', 300);
+
 if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     http_response_code(405);
     echo json_encode(['erro' => 'Método não permitido. Use POST.']);
     exit;
 }
 
-/*
- * Verifica se o arquivo foi enviado.
- * Retorna erro 400 se não houver arquivo.
- */
 if (!isset($_FILES['file'])) {
     http_response_code(400);
     echo json_encode(['erro' => 'Nenhum arquivo enviado.']);
     exit;
 }
 
-/*
- * Lê o conteúdo do arquivo enviado.
- * Converte codificação para UTF-8, se necessário.
- */
 $arquivo = $_FILES['file'];
 $conteudo = file_get_contents($arquivo['tmp_name']);
 if (!mb_check_encoding($conteudo, 'UTF-8')) {
     $conteudo = mb_convert_encoding($conteudo, 'UTF-8', 'ISO-8859-1');
 }
 
-/*
- * Processa o arquivo e retorna o resultado como JSON.
- */
 $resultado = processarAFD1510($conteudo);
 echo json_encode($resultado);
 
-/*
- * cleanRazaoSocial - Limpa a razão social, removendo prefixos numéricos ou caracteres indesejados.
- * @param string $razaoSocial Texto bruto da razão social.
- * @return string Razão social limpa.
- */
 function cleanRazaoSocial($razaoSocial) {
-    // Remove espaços em branco iniciais e finais
     $razaoSocial = trim($razaoSocial);
-    // Remove prefixos numéricos ou caracteres não alfabéticos no início
     $razaoSocial = preg_replace('/^\d+\s*/', '', $razaoSocial);
-    // Remove caracteres de controle ou não imprimíveis
     $razaoSocial = preg_replace('/[\x00-\x1F\x7F]/u', '', $razaoSocial);
     return $razaoSocial;
 }
 
-/*
- * processarAFD1510 - Função principal para processar o arquivo AFD da Portaria 1510.
- * Divide as linhas em registros por tipo, valida sequência, comprimento e PIS.
- * Retorna um objeto com registros, linhas inválidas e metadados.
- * @param string $data Conteúdo do arquivo AFD.
- * @return array Resultado processado.
- */
 function processarAFD1510($data) {
-    // Inicializa arrays para cada tipo de registro
     $registros = ['1' => [], '2' => [], '3' => [], '4' => [], '5' => [], '9' => []];
     $linhasInvalidas = [];
-    // Remove \r e divide em linhas
-    $linhas = explode("\n", str_replace("\r", "", $data));
+    $linhas = [];
+    $data = str_replace("\r", "", $data);
+    $linhasRaw = explode("\n", $data);
     $ultimaSequencia = null;
+    $totalLinhasProcessadas = 0;
 
-    // Define comprimentos mínimos por tipo para validação
     $minLengthByType = [
-        '1' => 232, // Cabeçalho
-        '2' => 299, // Empresa
-        '3' => 34,  // Marcação de ponto
-        '4' => 34,  // Ajuste de relógio
-        '5' => 87,  // Funcionário
-        '9' => 46,  // Trailer
+        '1' => 232,
+        '2' => 299,
+        '3' => 34,
+        '4' => 34,
+        '5' => 87,
+        '9' => 46,
     ];
 
-    // Processa cada linha do arquivo
-    foreach ($linhas as $linha) {
+    foreach ($linhasRaw as $index => $linha) {
         $linha = trim($linha);
-        if (empty($linha)) continue;
+        if (empty($linha)) {
+            continue;
+        }
 
-        // Extrai NSR (número sequencial) e tipo
         $nsr = substr($linha, 0, 9);
         $tipo = substr($linha, 9, 1);
-        $numeroLinha = intval($nsr);
+        $numeroLinha = is_numeric($nsr) ? intval($nsr) : $nsr;
+        $totalLinhasProcessadas++;
 
-        // Valida sequência de NSR
-        if ($tipo !== '1' && $ultimaSequencia !== null && $numeroLinha !== $ultimaSequencia + 1) {
+        $linhas[] = ['conteudo' => $linha, 'tipo' => $tipo];
+
+        if ($tipo !== '1' && $ultimaSequencia !== null && is_numeric($numeroLinha) && $numeroLinha < $ultimaSequencia) {
             $linhasInvalidas[] = $linha;
             continue;
         }
-        $ultimaSequencia = $numeroLinha;
 
-        // Valida tipo e comprimento da linha
+        if (is_numeric($numeroLinha)) {
+            $ultimaSequencia = $numeroLinha;
+        }
+
         if (array_key_exists($tipo, $registros) && strlen($linha) >= $minLengthByType[$tipo]) {
-            // Validações específicas por tipo
             if ($tipo === '1') {
-                // Cabeçalho: NSR deve ser '000000000' e campo 10 deve ser '1'
                 if ($nsr !== '000000000' || substr($linha, 10, 1) !== '1') {
                     $linhasInvalidas[] = $linha;
                     continue;
                 }
+            } elseif ($tipo === '2') {
+                $tipoEmpregador = substr($linha, 22, 1);
+                $cnpjCpf = in_array($tipoEmpregador, ['1', '2']) ? trim(substr($linha, 23, 14)) : trim(substr($linha, 37, 14));
+                if (!preg_match('/^\d{14}$/', $cnpjCpf)) {
+                    $linhasInvalidas[] = $linha;
+                    continue;
+                }
             } elseif ($tipo === '3') {
-                // Marcação de ponto: PIS deve ter 12 dígitos
                 $pis = substr($linha, 22, 12);
+                $dataHora = substr($linha, 10, 12);
                 if (!preg_match('/^\d{12}$/', $pis)) {
                     $linhasInvalidas[] = $linha;
                     continue;
                 }
+                if (!preg_match('/^\d{8}\d{4}$/', $dataHora)) {
+                    $linhasInvalidas[] = $linha;
+                    continue;
+                }
             } elseif ($tipo === '5') {
-                // Funcionário: PIS deve ter 12 dígitos, operação deve ser 'I', 'A' ou 'E'
                 $pis = substr($linha, 23, 12);
                 $operacao = substr($linha, 22, 1);
                 if (!preg_match('/^\d{12}$/', $pis) || !in_array($operacao, ['I', 'A', 'E'])) {
@@ -154,7 +135,6 @@ function processarAFD1510($data) {
                     continue;
                 }
             } elseif ($tipo === '9') {
-                // Trailer: NSR deve ser '999999999'
                 if ($nsr !== '999999999') {
                     $linhasInvalidas[] = $linha;
                     continue;
@@ -166,31 +146,26 @@ function processarAFD1510($data) {
         }
     }
 
-    // Extrai metadados do cabeçalho (tipo 1)
     $cabecalho = $registros['1'][0] ?? '';
-    $serialEquipamento = substr($cabecalho, 187, 17); // Posições 188 a 204 (17 caracteres)
+    $serialEquipamento = substr($cabecalho, 187, 17);
     $dataInicio = substr($cabecalho, 204, 8);
     $dataFim = substr($cabecalho, 212, 8);
-    $dataHoraGeracao = substr($cabecalho, 220, 8) . substr($cabecalho, 228, 4); // Data (ddmmaaaa) + Hora (HHMM)
+    $dataHoraGeracao = substr($cabecalho, 220, 8) . substr($cabecalho, 228, 4);
+    $cnpjCpfEmpregadorCabecalho = trim(substr($cabecalho, 11, 14));
 
-    // Valida o número serial (deve ser 17 dígitos numéricos)
-    if ($cabecalho && !preg_match('/^\d{17}$/', $serialEquipamento)) {
-        $linhasInvalidas[] = $cabecalho;
-        $registros['1'] = [];
-    }
-
-    // Extrai informações da última alteração de empresa (tipo 2)
     $ultimoTipo2 = end($registros['2']);
     $ultimaAlteracaoEmpresa = null;
     if ($ultimoTipo2) {
+        $tipoEmpregador = substr($ultimoTipo2, 22, 1);
+        $cnpjCpf = in_array($tipoEmpregador, ['1', '2']) ? trim(substr($ultimoTipo2, 23, 14)) : trim(substr($ultimoTipo2, 37, 14));
+        $razaoSocialPos = in_array($tipoEmpregador, ['1', '2']) ? 49 : 51;
         $ultimaAlteracaoEmpresa = [
-            'dataHoraGravacao' => substr($ultimoTipo2, 10, 8) . substr($ultimoTipo2, 18, 4), // Data (ddmmaaaa) + Hora (HHMM)
-            'cnpjCpfEmpregador' => trim(substr($ultimoTipo2, 23, 14)),
-            'razaoSocial' => cleanRazaoSocial(substr($ultimoTipo2, 49, 150))
+            'dataHoraGravacao' => substr($ultimoTipo2, 10, 8) . substr($ultimoTipo2, 18, 4),
+            'cnpjCpfEmpregador' => $cnpjCpf,
+            'razaoSocial' => cleanRazaoSocial(substr($ultimoTipo2, $razaoSocialPos, 150))
         ];
     }
 
-    // Valida o trailer (tipo 9)
     $trailer = $registros['9'][0] ?? '';
     $totalTipo2 = (int) substr($trailer, 9, 9);
     $totalTipo3 = (int) substr($trailer, 18, 9);
@@ -207,16 +182,21 @@ function processarAFD1510($data) {
         $registros['9'] = [];
     }
 
-    // Retorna resultado estruturado
-    return [
-        'registros' => $registros,
+    $resultado = [
+        'registros' => array_map(function($tipoRegistros) {
+            return array_map('strval', $tipoRegistros);
+        }, $registros),
         'linhasInvalidas' => $linhasInvalidas,
-        'totalLinhas' => count($linhas),
+        'linhas' => $linhas,
+        'totalLinhas' => count($linhasRaw),
         'dataInicio' => $dataInicio,
         'dataFim' => $dataFim,
         'dataHoraGeracao' => $dataHoraGeracao,
-        'serialEquipamento' => $serialEquipamento, // Adicionado
+        'cnpjCpfEmpregadorCabecalho' => $cnpjCpfEmpregadorCabecalho,
+        'serialEquipamento' => $serialEquipamento,
         'ultimaAlteracaoEmpresa' => $ultimaAlteracaoEmpresa
     ];
+
+    return $resultado;
 }
 ?>
