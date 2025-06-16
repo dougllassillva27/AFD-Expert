@@ -48,12 +48,7 @@ if (!isset($_FILES['file'])) {
 }
 
 $arquivo = $_FILES['file'];
-$conteudo = file_get_contents($arquivo['tmp_name']);
-if (!mb_check_encoding($conteudo, 'UTF-8')) {
-    $conteudo = mb_convert_encoding($conteudo, 'UTF-8', 'ISO-8859-1');
-}
-
-$resultado = processarAFD1510($conteudo);
+$resultado = processarAFD1510($arquivo['tmp_name']);
 echo json_encode($resultado);
 
 function cleanRazaoSocial($razaoSocial) {
@@ -63,12 +58,10 @@ function cleanRazaoSocial($razaoSocial) {
     return $razaoSocial;
 }
 
-function processarAFD1510($data) {
+function processarAFD1510($filePath) {
     $registros = ['1' => [], '2' => [], '3' => [], '4' => [], '5' => [], '9' => []];
     $linhasInvalidas = [];
     $linhas = [];
-    $data = str_replace("\r", "", $data);
-    $linhasRaw = explode("\n", $data);
     $ultimaSequencia = null;
     $totalLinhasProcessadas = 0;
 
@@ -81,7 +74,20 @@ function processarAFD1510($data) {
         '9' => 46,
     ];
 
-    foreach ($linhasRaw as $index => $linha) {
+    // Usar SplFileObject para leitura linha a linha
+    $file = new SplFileObject($filePath, 'r');
+    $file->setFlags(SplFileObject::DROP_NEW_LINE | SplFileObject::SKIP_EMPTY);
+
+    while (!$file->eof()) {
+        $linha = $file->fgets();
+        if ($linha === false) {
+            continue;
+        }
+
+        // Converter codificação para UTF-8, se necessário
+        if (!mb_check_encoding($linha, 'UTF-8')) {
+            $linha = mb_convert_encoding($linha, 'UTF-8', 'ISO-8859-1');
+        }
         $linha = trim($linha);
         if (empty($linha)) {
             continue;
@@ -146,6 +152,8 @@ function processarAFD1510($data) {
         }
     }
 
+    $file = null; // Liberar recurso
+
     $cabecalho = $registros['1'][0] ?? '';
     $serialEquipamento = substr($cabecalho, 187, 17);
     $dataInicio = substr($cabecalho, 204, 8);
@@ -188,7 +196,7 @@ function processarAFD1510($data) {
         }, $registros),
         'linhasInvalidas' => $linhasInvalidas,
         'linhas' => $linhas,
-        'totalLinhas' => count($linhasRaw),
+        'totalLinhas' => $totalLinhasProcessadas,
         'dataInicio' => $dataInicio,
         'dataFim' => $dataFim,
         'dataHoraGeracao' => $dataHoraGeracao,

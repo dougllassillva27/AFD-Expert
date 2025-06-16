@@ -243,7 +243,6 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
       return;
     }
     this.dom.saveSearchButton.disabled = false;
-    // Gerar resultados interpretados
     const cacheKey = `search_interpreted_${termo}`;
     if (this.resultCache[cacheKey]) {
       this.dom.resultado.textContent = this.resultCache[cacheKey];
@@ -312,7 +311,7 @@ Razão social: ${this.registrosData.ultimaAlteracaoEmpresa.razaoSocial}
     const todasLinhas = Object.values(this.registrosData.registros)
       .flat()
       .sort((a, b) => parseInt(a.substring(0, 9), 10) - parseInt(b.substring(0, 9), 10));
-    const batchSize = 1000;
+    const batchSize = 500;
     let index = 0;
     const resultados = [];
     const processBatch = () => {
@@ -509,7 +508,7 @@ const AFDProcessor1510 = {
           throw new Error('Erro ao processar o arquivo');
         }
         this.registrosData = await response.json();
-        this.displayResult(this.registrosData.registros);
+        this.displayResult(this.registrosData);
         document.querySelectorAll('.buttons button').forEach((button) => {
           button.disabled = false;
           button.classList.remove('btn-disabled');
@@ -524,23 +523,30 @@ const AFDProcessor1510 = {
   },
   displayResult(data) {
     const cacheKey = JSON.stringify({
-      types: Object.keys(data).sort(),
-      content: Object.values(data).flat().join('|'),
+      types: Object.keys(data.registros).sort(),
+      content: Object.keys(data.registros)
+        .map((tipo) => data.registros[tipo].length)
+        .join('|'),
     });
     if (this.resultCache[cacheKey]) {
       this.dom.resultado.textContent = this.resultCache[cacheKey];
       return;
     }
+
     const chunks = [];
-    for (const tipo in data) {
-      const registros = Array.isArray(data[tipo]) ? data[tipo] : Object.values(data[tipo]);
-      if (registros.length > 0) {
-        chunks.push(`${this.tipoRegistroDescricao[tipo] || `Tipo ${tipo}:`}\n`);
-        chunks.push(...registros.map((linha) => `${linha}\n`));
-        chunks.push('-'.repeat(40) + '\n');
+    chunks.push('Resumo do arquivo processado:\n');
+    chunks.push('-'.repeat(40) + '\n');
+    chunks.push(`Total de linhas: ${data.totalLinhas}\n`);
+    for (const tipo in data.registros) {
+      const count = data.registros[tipo].length;
+      if (count > 0) {
+        chunks.push(`${this.tipoRegistroDescricao[tipo] || `Tipo ${tipo}:`} ${count} registros\n`);
       }
     }
-    const result = chunks.length > 0 ? chunks.join('') : 'Nenhum registro encontrado.\n';
+    chunks.push('-'.repeat(40) + '\n');
+    chunks.push('Use os botões de filtro para visualizar os registros completos.\n');
+
+    const result = chunks.join('');
     this.resultCache[cacheKey] = result;
     this.dom.resultado.textContent = result;
   },
@@ -552,7 +558,76 @@ const AFDProcessor1510 = {
     this.dom.searchArea.style.display = 'none';
     this.dom.searchInput.value = '';
     const filteredData = tipo === 'all' ? this.registrosData.registros : { [tipo]: this.registrosData.registros[tipo] || [] };
-    this.displayResult(filteredData);
+
+    this.displayFilteredData(filteredData);
+  },
+  displayFilteredData(data) {
+    const cacheKey = 'filtered_data_' + JSON.stringify(Object.keys(data));
+    if (this.resultCache[cacheKey]) {
+      this.dom.resultado.textContent = this.resultCache[cacheKey];
+      return;
+    }
+
+    this.showLoading(true);
+
+    const chunks = [];
+    const tipos = Object.keys(data);
+    let tipoIndex = 0;
+    const batchSize = 2000; // Processa 2000 registros por vez
+
+    // Função para processar os registros de UM tipo em lotes
+    const processRegistrosBatch = (registros, registroIndex, callback) => {
+      const end = Math.min(registroIndex + batchSize, registros.length);
+
+      for (let i = registroIndex; i < end; i++) {
+        chunks.push(`${registros[i]}\n`);
+      }
+
+      const progress = Math.round((end / registros.length) * 100);
+      document.getElementById('loadingOverlay').querySelector('p').textContent = `Processando Tipo ${tipos[tipoIndex]}... ${progress}%`;
+      document.getElementById('loadingOverlay').querySelector('.progress-bar-fill').style.width = `${progress}%`;
+
+      if (end < registros.length) {
+        // Se houver mais registros deste tipo, agenda o próximo lote
+        setTimeout(() => processRegistrosBatch(registros, end, callback), 0);
+      } else {
+        // Terminou de processar os registros deste tipo, chama o callback para avançar
+        callback();
+      }
+    };
+
+    // Função para orquestrar o processamento dos DIFERENTES tipos
+    const processTipos = () => {
+      if (tipoIndex >= tipos.length) {
+        // Todos os tipos foram processados
+        const result = chunks.length > 0 ? chunks.join('') : 'Nenhum registro encontrado para o filtro aplicado.\n';
+        this.resultCache[cacheKey] = result;
+        this.dom.resultado.textContent = result;
+        this.hideLoading();
+        return;
+      }
+
+      const tipo = tipos[tipoIndex];
+      const registros = Array.isArray(data[tipo]) ? data[tipo] : [];
+
+      if (registros.length > 0) {
+        chunks.push(`${this.tipoRegistroDescricao[tipo] || `Tipo ${tipo}:`}\n`);
+        // Inicia o processamento em lote para os registros do tipo atual
+        processRegistrosBatch(registros, 0, () => {
+          // Callback: quando terminar, adiciona o separador e avança para o próximo tipo
+          chunks.push('-'.repeat(40) + '\n');
+          tipoIndex++;
+          setTimeout(processTipos, 0); // Avança para o próximo tipo de forma assíncrona
+        });
+      } else {
+        // Se não há registros para este tipo, apenas avança para o próximo
+        tipoIndex++;
+        setTimeout(processTipos, 0);
+      }
+    };
+
+    // Inicia o processo
+    processTipos();
   },
   filterInvalidLines() {
     this.dom.searchArea.style.display = 'none';
@@ -786,7 +861,7 @@ Razão social: ${this.format.cleanRazaoSocial(this.registrosData.ultimaAlteracao
     switch (tipo) {
       case '1':
         if (linha.length >= 232) {
-          descricao += `Cabeçalho - Data Início: ${this.format.date(linha.substring(204, 212))} | Data Fim: ${this.format.date(linha.substring(212, 220))}`;
+          descricao += `Cabeçalho - Data Início: ${this.format.date(linha.substring(204, 212))} | Data de fim: ${this.format.date(linha.substring(212, 220))}`;
         } else {
           descricao += 'Cabeçalho - Formato inválido';
         }
@@ -844,7 +919,11 @@ Razão social: ${this.format.cleanRazaoSocial(this.registrosData.ultimaAlteracao
     this.dom.resultado.textContent = '';
   },
   updateFileName() {
-    this.dom.fileName.textContent = this.dom.fileInput.files[0]?.name || 'Nenhum arquivo selecionado';
+    if (this.dom.fileInput.files.length > 0) {
+      this.dom.fileName.textContent = this.dom.fileInput.files[0].name;
+    } else {
+      this.dom.fileName.textContent = 'Nenhum arquivo selecionado';
+    }
   },
   clearFile() {
     this.dom.fileInput.value = '';
