@@ -26,7 +26,7 @@
 /**
  * processar_afd_1510.php - Backend para processamento de arquivos AFD da Portaria 1510.
  * Recebe o arquivo via POST, valida, processa e retorna JSON com os registros.
- * Inclui otimizações como compressão gzip e validação de comprimento de linhas.
+ * Otimizado para baixo consumo de memória, processando arquivos grandes via streaming.
  */
 
 header('Content-Type: application/json');
@@ -41,9 +41,9 @@ if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
     exit;
 }
 
-if (!isset($_FILES['file'])) {
+if (!isset($_FILES['file']) || !isset($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
     http_response_code(400);
-    echo json_encode(['erro' => 'Nenhum arquivo enviado.']);
+    echo json_encode(['erro' => 'Nenhum arquivo enviado ou erro no upload.']);
     exit;
 }
 
@@ -58,101 +58,88 @@ function cleanRazaoSocial($razaoSocial) {
     return $razaoSocial;
 }
 
-function processarAFD1510($filePath) {
+function processarAFD1510($caminhoArquivo) {
     $registros = ['1' => [], '2' => [], '3' => [], '4' => [], '5' => [], '9' => []];
     $linhasInvalidas = [];
-    $linhas = [];
     $ultimaSequencia = null;
     $totalLinhasProcessadas = 0;
 
     $minLengthByType = [
-        '1' => 232,
-        '2' => 299,
-        '3' => 34,
-        '4' => 34,
-        '5' => 87,
-        '9' => 46,
+        '1' => 232, '2' => 299, '3' => 34,
+        '4' => 34, '5' => 87, '9' => 46,
     ];
 
-    // Usar SplFileObject para leitura linha a linha
-    $file = new SplFileObject($filePath, 'r');
-    $file->setFlags(SplFileObject::DROP_NEW_LINE | SplFileObject::SKIP_EMPTY);
+    try {
+        $arquivo = new SplFileObject($caminhoArquivo, 'r');
+        $arquivo->setFlags(SplFileObject::DROP_NEW_LINE | SplFileObject::SKIP_EMPTY);
 
-    while (!$file->eof()) {
-        $linha = $file->fgets();
-        if ($linha === false) {
-            continue;
-        }
+        while (!$arquivo->eof()) {
+            $linha = $arquivo->fgets();
+            if ($linha === false) continue;
 
-        // Converter codificação para UTF-8, se necessário
-        if (!mb_check_encoding($linha, 'UTF-8')) {
-            $linha = mb_convert_encoding($linha, 'UTF-8', 'ISO-8859-1');
-        }
-        $linha = trim($linha);
-        if (empty($linha)) {
-            continue;
-        }
-
-        $nsr = substr($linha, 0, 9);
-        $tipo = substr($linha, 9, 1);
-        $numeroLinha = is_numeric($nsr) ? intval($nsr) : $nsr;
-        $totalLinhasProcessadas++;
-
-        $linhas[] = ['conteudo' => $linha, 'tipo' => $tipo];
-
-        if ($tipo !== '1' && $ultimaSequencia !== null && is_numeric($numeroLinha) && $numeroLinha < $ultimaSequencia) {
-            $linhasInvalidas[] = $linha;
-            continue;
-        }
-
-        if (is_numeric($numeroLinha)) {
-            $ultimaSequencia = $numeroLinha;
-        }
-
-        if (array_key_exists($tipo, $registros) && strlen($linha) >= $minLengthByType[$tipo]) {
-            if ($tipo === '1') {
-                if ($nsr !== '000000000' || substr($linha, 10, 1) !== '1') {
-                    $linhasInvalidas[] = $linha;
-                    continue;
-                }
-            } elseif ($tipo === '2') {
-                $tipoEmpregador = substr($linha, 22, 1);
-                $cnpjCpf = in_array($tipoEmpregador, ['1', '2']) ? trim(substr($linha, 23, 14)) : trim(substr($linha, 37, 14));
-                if (!preg_match('/^\d{14}$/', $cnpjCpf)) {
-                    $linhasInvalidas[] = $linha;
-                    continue;
-                }
-            } elseif ($tipo === '3') {
-                $pis = substr($linha, 22, 12);
-                $dataHora = substr($linha, 10, 12);
-                if (!preg_match('/^\d{12}$/', $pis)) {
-                    $linhasInvalidas[] = $linha;
-                    continue;
-                }
-                if (!preg_match('/^\d{8}\d{4}$/', $dataHora)) {
-                    $linhasInvalidas[] = $linha;
-                    continue;
-                }
-            } elseif ($tipo === '5') {
-                $pis = substr($linha, 23, 12);
-                $operacao = substr($linha, 22, 1);
-                if (!preg_match('/^\d{12}$/', $pis) || !in_array($operacao, ['I', 'A', 'E'])) {
-                    $linhasInvalidas[] = $linha;
-                    continue;
-                }
-            } elseif ($tipo === '9') {
-                if ($nsr !== '999999999') {
-                    $linhasInvalidas[] = $linha;
-                    continue;
-                }
+            if (!mb_check_encoding($linha, 'UTF-8')) {
+                $linha = mb_convert_encoding($linha, 'UTF-8', 'ISO-8859-1');
             }
-            $registros[$tipo][] = $linha;
-        } else {
-            $linhasInvalidas[] = $linha;
-        }
-    }
+            $linha = trim($linha);
+            if (empty($linha)) continue;
 
-    $file = null; // Liberar recurso
+            $nsr = substr($linha, 0, 9);
+            $tipo = substr($linha, 9, 1);
+            $numeroLinha = is_numeric($nsr) ? intval($nsr) : $nsr;
+            $totalLinhasProcessadas++;
+
+            if ($tipo !== '1' && $ultimaSequencia !== null && is_numeric($numeroLinha) && $numeroLinha < $ultimaSequencia) {
+                $linhasInvalidas[] = $linha;
+                continue;
+            }
+            if (is_numeric($numeroLinha)) {
+                $ultimaSequencia = $numeroLinha;
+            }
+
+            if (array_key_exists($tipo, $registros) && strlen($linha) >= $minLengthByType[$tipo]) {
+                if ($tipo === '1') {
+                    if ($nsr !== '000000000' || substr($linha, 10, 1) !== '1') {
+                        $linhasInvalidas[] = $linha;
+                        continue;
+                    }
+                } elseif ($tipo === '2') {
+                    $tipoEmpregador = substr($linha, 22, 1);
+                    $cnpjCpf = in_array($tipoEmpregador, ['1', '2']) ? trim(substr($linha, 23, 14)) : trim(substr($linha, 37, 14));
+                    if (!preg_match('/^\d{14}$/', $cnpjCpf)) {
+                        $linhasInvalidas[] = $linha;
+                        continue;
+                    }
+                } elseif ($tipo === '3') {
+                    $pis = substr($linha, 22, 12);
+                    $dataHora = substr($linha, 10, 12);
+                    if (!preg_match('/^\d{12}$/', $pis) || !preg_match('/^\d{8}\d{4}$/', $dataHora)) {
+                        $linhasInvalidas[] = $linha;
+                        continue;
+                    }
+                } elseif ($tipo === '5') {
+                    $pis = substr($linha, 23, 12);
+                    $operacao = substr($linha, 22, 1);
+                    if (!in_array($operacao, ['I', 'A', 'E']) || !preg_match('/^\d{12}$/', $pis)) {
+                        $linhasInvalidas[] = $linha;
+                        continue;
+                    }
+                } elseif ($tipo === '9') {
+                    if ($nsr !== '999999999') {
+                        $linhasInvalidas[] = $linha;
+                        continue;
+                    }
+                }
+                $registros[$tipo][] = $linha;
+            } else {
+                $linhasInvalidas[] = $linha;
+            }
+        }
+    } catch (Exception $e) {
+        http_response_code(500);
+        return ['erro' => 'Falha ao ler o arquivo.', 'detalhe' => $e->getMessage()];
+    } finally {
+        $arquivo = null;
+    }
 
     $cabecalho = $registros['1'][0] ?? '';
     $serialEquipamento = substr($cabecalho, 187, 17);
@@ -175,27 +162,26 @@ function processarAFD1510($filePath) {
     }
 
     $trailer = $registros['9'][0] ?? '';
-    $totalTipo2 = (int) substr($trailer, 9, 9);
-    $totalTipo3 = (int) substr($trailer, 18, 9);
-    $totalTipo4 = (int) substr($trailer, 27, 9);
-    $totalTipo5 = (int) substr($trailer, 36, 9);
-    $validTrailer = (
-        $totalTipo2 === count($registros['2']) &&
-        $totalTipo3 === count($registros['3']) &&
-        $totalTipo4 === count($registros['4']) &&
-        $totalTipo5 === count($registros['5'])
-    );
-    if ($trailer && !$validTrailer) {
-        $linhasInvalidas[] = $trailer;
-        $registros['9'] = [];
+    if ($trailer) {
+        $totalTipo2 = (int) substr($trailer, 10, 9);
+        $totalTipo3 = (int) substr($trailer, 19, 9);
+        $totalTipo4 = (int) substr($trailer, 28, 9);
+        $totalTipo5 = (int) substr($trailer, 37, 9);
+        $validTrailer = (
+            $totalTipo2 === count($registros['2']) &&
+            $totalTipo3 === count($registros['3']) &&
+            $totalTipo4 === count($registros['4']) &&
+            $totalTipo5 === count($registros['5'])
+        );
+        if (!$validTrailer) {
+            $linhasInvalidas[] = $trailer;
+            $registros['9'] = [];
+        }
     }
 
-    $resultado = [
-        'registros' => array_map(function($tipoRegistros) {
-            return array_map('strval', $tipoRegistros);
-        }, $registros),
+    return [
+        'registros' => array_map(fn($tipoRegistros) => array_map('strval', $tipoRegistros), $registros),
         'linhasInvalidas' => $linhasInvalidas,
-        'linhas' => $linhas,
         'totalLinhas' => $totalLinhasProcessadas,
         'dataInicio' => $dataInicio,
         'dataFim' => $dataFim,
@@ -204,7 +190,5 @@ function processarAFD1510($filePath) {
         'serialEquipamento' => $serialEquipamento,
         'ultimaAlteracaoEmpresa' => $ultimaAlteracaoEmpresa
     ];
-
-    return $resultado;
 }
 ?>

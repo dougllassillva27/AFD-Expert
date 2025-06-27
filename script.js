@@ -687,54 +687,52 @@ Razão social: ${this.format.cleanRazaoSocial(this.registrosData.ultimaAlteracao
     }
     this.dom.resultado.textContent = detalhesText;
   },
+  // Dentro do objeto AFDProcessor1510
   performSearch() {
     const termo = this.dom.searchInput.value.trim();
     if (!termo) {
       alert('Digite um termo para pesquisar');
       return;
     }
-    if (!this.registrosData || !this.registrosData.linhas) {
+    if (!this.registrosData || !this.registrosData.registros) {
       alert('Por favor, carregue um arquivo antes de pesquisar.');
       return;
     }
     this.hideLoading();
     const isPIS = /^\d{12}$/.test(termo);
-    if (isPIS) {
-      this.resultCache = {};
-    }
     const resultados = [];
-    let totalResultados = 0;
-    if (isPIS) {
-      for (const { conteudo: linha, tipo } of this.registrosData.linhas) {
-        if (!linha || typeof linha !== 'string') {
-          continue;
+    // A lógica de busca agora itera sobre os registros já categorizados
+    for (const tipo in this.registrosData.registros) {
+      for (const linha of this.registrosData.registros[tipo]) {
+        if (!linha || typeof linha !== 'string') continue;
+        let encontrada = false;
+        if (isPIS) {
+          let pis = '';
+          if (tipo === '3' && linha.length >= 34) {
+            pis = linha.substring(22, 34).trim();
+          } else if (tipo === '5' && linha.length >= 35) {
+            pis = linha.substring(23, 35).trim();
+          }
+          if (pis === termo) encontrada = true;
+        } else {
+          if (linha.toLowerCase().includes(termo.toLowerCase())) {
+            encontrada = true;
+          }
         }
-        let pis = '';
-        if (tipo === '3' && linha.length >= 34) {
-          pis = linha.substring(22, 34).trim();
-        } else if (tipo === '5' && linha.length >= 35) {
-          pis = linha.substring(23, 35).trim();
-        }
-        if (pis === termo) {
-          resultados.push({ conteudo: linha, tipo });
-          totalResultados++;
-        }
-      }
-    } else {
-      for (const { conteudo: linha, tipo } of this.registrosData.linhas) {
-        if (linha && typeof linha === 'string' && linha.toLowerCase().includes(termo.toLowerCase())) {
-          resultados.push({ conteudo: linha, tipo });
-          totalResultados++;
+        if (encontrada) {
+          // Armazenamos o objeto {linha, tipo} para a interpretação posterior
+          resultados.push({ conteudo: linha, tipo: tipo });
         }
       }
     }
     this.lastSearchResults = resultados;
-    if (totalResultados === 0) {
+    if (resultados.length === 0) {
       this.dom.resultado.textContent = 'Nenhum resultado encontrado para o termo pesquisado.';
       this.lastSearchResults = null;
       this.dom.saveSearchButton.disabled = true;
       return;
     }
+    // O resto da função para exibir os resultados permanece o mesmo...
     const cacheKey = `search_interpreted_${termo}`;
     if (this.resultCache[cacheKey]) {
       this.dom.resultado.textContent = this.resultCache[cacheKey];
